@@ -1,0 +1,155 @@
+---
+title: "scoringAndSurvivalAnalysis"
+author: "Ruqian"
+date: "06/05/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Download the new gene expression data from GEO
+
+```{r datasetLoad, eval=FALSE}
+
+library(GEOquery)
+gse = getGEO(GEO = "GSE14520")
+gse[[1]]
+
+```
+
+
+## Get the count data 
+
+```{r getCount}
+newHCC = gse[[1]]
+exprs(newHCC)[1:5,1:5]
+summary(exprs(newHCC)[,1:5])
+```
+Get the gene expression matrxi for all new samples
+```{r makeGEM}
+dim(pData(newHCC))
+dim(fData(newHCC))
+
+geneMatrix = exprs(newHCC)
+
+# find probes with Symbol
+features = fData(newHCC)
+pheoNew = pData(newHCC)
+
+tumourSample = pheoNew$geo_accession[pheoNew$`Tissue:ch1`=="Liver Tumor Tissue"]
+tumourSample = c(tumourSample,pheoNew$geo_accession[pheoNew$`tissue:ch1`=="Liver Tumor Tissue"])
+tumourSample = tumourSample[!is.na(tumourSample)]
+keep = features[features$`Gene Symbol` %in% mapToType$hgnc_symbol[mapToType$transcript_biotype=="protein_coding"],]
+# keep = keep[!keep$Protein_Product=="",]
+# 
+geneMatrix = geneMatrix[keep$ID,]
+rownames(geneMatrix) = keep$`Gene Symbol`
+
+geneMatrix = geneMatrix[, tumourSample]
+
+dim(geneMatrix)
+# 
+# new2 = getGEO(GEO="GSE32510")
+# newHCC2 = new2[[1]]
+# 
+# geneMatrix2 = exprs(newHCC2)
+# colnames(pData(newHCC2))
+# sp = getGEOSuppFiles(GEO="GSE32510")
+# 
+# new3 = getGEO(GEO="GSE1898")
+# colnames(pData(new3[[1]]))
+# 
+# new4 = getGEO(GEO="GSE4024")
+# colnames(pData(new4[[1]]))
+# 
+# new5 = getGEO(GEO="GSE14520")
+# colnames(pData(new5[[1]]))
+
+
+```
+
+```{r scoringGS1}
+
+
+rankedNew = rankGenes(geneMatrix)
+scoredNewDf1 = simpleScore(rankedNew, upSet = up_ic1_gs, downSet = dn_ic1_gs)
+scoredNewDf2 = simpleScore(rankedNew, upSet = up_ic2_gs, downSet = dn_ic2_gs)
+scoredNewDf3 = simpleScore(rankedNew, upSet = up_ic3_gs, downSet = dn_ic3_gs)
+newData = data.frame(GS1 = scoredNewDf1$TotalScore, GS2 = scoredNewDf2$TotalScore, GS3 = scoredNewDf3$TotalScore)
+rownames(newData) = rownames(scoredNewDf1)
+colnames(newData) = c("scoredf1.TotalScore", "scoredf2.TotalScore", "scoredf3.TotalScore")
+
+newPredictions =  predict(regressionLm, newData, type="class")
+# group1 = rownames(scoredNewDf1[order(scoredNewDf1$TotalScore, decreasing = TRUE),][1:35,])
+# group2 = rownames(scoredNewDf1[order(scoredNewDf1$TotalScore, decreasing = TRUE),][36:100,])
+
+newDf = data.frame(pred = newPredictions, "GSM" = rownames(newData))
+
+```
+
+With the new samples' predicted iCluster labels, we do survival analysis
+
+```{r survivalAna}
+library(survival)
+
+sur.os = read.delim("~/Documents/davisLab/HCC/GSE14520_Extra_Supplement.txt", quote="", stringsAsFactors=FALSE)
+
+surdf = merge(newDf, sur.os, by.x = "GSM", by.y = "Affy_GSM")
+
+mydata<-surdf
+## Step (1)
+## Create the Survival Object
+
+mySurv<-Surv(time=mydata$Survival.months, event = mydata$Survival.status)
+class(mySurv)
+head(mySurv)
+
+## specify predictor variable in the formula
+myfit<-survfit(mySurv~mydata$pred)
+table(mydata$pred)
+
+plot(myfit, col=c("red","blue","green"))
+legend("topright", c("iCluster1","iCluster2",'iCluster3'), col=c("red","blue","green"), lty=1)
+
+## Now we see that survival of iCluster1 is the worst 
+## Q: Is it better by chance, or statistically significant?
+survdiff(mySurv~mydata$pred)
+survdiff(mySurv~pred+Age+Gender,data = mydata) 
+###  plot the inverse of a survival function
+
+## plot(myfit, fun="event", col=c("red","blue","green"), mark=3)
+
+coxph(formula = as.formula(paste("mySurv~pred+Age+Gender+Predicted.risk.Metastasis.Signature")), data = mydata)
+### C
+covCol = colnames(mydata)[c(6,11:19,22,23)]
+cov = paste(covCol, collapse = "+")
+coxph(formula = as.formula(paste("mySurv~pred+Age+Gender",cov,sep="+")), data = mydata)
+
+
+covCol = colnames(mydata)[c(6,11:19,22,23)]
+covDf = sapply(covCol, function(x){
+ cov = paste(x, collapse = "+")
+ coxFit = coxph(formula = as.formula(paste("mySurv~pred+Age+Gender",cov,sep="+")), data = mydata)
+      
+    coxRes = c(summary(coxFit)$coef[1,], 
+               summary(coxFit)$conf.int[1,2:4], 
+               summary(coxFit)$concordance, 
+               summary(coxFit)$sctest)
+    coxRes
+})
+### End C
+```
+
+```{r}
+clinical <- read.delim("~/Documents/davisLab/HCC/clinical.cart.2018-05-16/clinical.tsv", quote="", stringsAsFactors=FALSE)
+
+dim(merge(clinical, g, by.x = 'submitter_id', by.y = "Case.ID"))
+
+icluster_clinical = merge(clinical, g, by.x = 'submitter_id', by.y = "Case.ID")
+
+tcgaSurv = Surv(time=icluster_clinical$days_to_death, event = icluster_clinical$vital_status)
+```
+
+
