@@ -145,11 +145,23 @@ covDf = sapply(covCol, function(x){
 ```{r}
 clinical <- read.delim("~/Documents/davisLab/HCC/clinical.cart.2018-05-16/clinical.tsv", quote="", stringsAsFactors=FALSE)
 
+time = rep("0",dim(clinical)[1])
+time = sapply(1:dim(clinical)[1], function(x){if(clinical$days_to_death[x]=="--"){time[x] = clinical$days_to_last_follow_up[x]}else{time[x] = clinical$days_to_death[x]}})
+
+clinical$time =as.numeric(time)
 dim(merge(clinical, g, by.x = 'submitter_id', by.y = "Case.ID"))
 
 icluster_clinical = merge(clinical, g, by.x = 'submitter_id', by.y = "Case.ID")
+icluster_clinical$vital_status[icluster_clinical$vital_status=="dead"] = 1 
+icluster_clinical$vital_status[icluster_clinical$vital_status=="alive"] = 0
+icluster_clinical$vital_status = as.numeric(icluster_clinical$vital_status)
+tcgaSurv = Surv(time=icluster_clinical$time, event = icluster_clinical$vital_status)
 
-tcgaSurv = Surv(time=icluster_clinical$days_to_death, event = icluster_clinical$vital_status)
+tcgaSurv.fit <- survfit(tcgaSurv~icluster_clinical$`iCluster clusters (k=3, Ronglai Shen)`)
+plot(tcgaSurv.fit, col=c("red","blue","green"))
+legend("topright", c("iCluster1","iCluster2",'iCluster3'), col=c("red","blue","green"), lty=1)
+
+survdiff(tcgaSurv~icluster_clinical$`iCluster clusters (k=3, Ronglai Shen)`)
 ```
 
 
