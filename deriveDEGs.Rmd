@@ -409,7 +409,8 @@ scoredf2_pdf = data.frame(files = rownames(scoredf2),scoredf2$TotalScore,
 scoredf3_pdf = data.frame(files = rownames(scoredf3),scoredf3$TotalScore, 
                           group = dge_object$samples$group)
 
-all = merge(merge(scoredf1_pdf, scoredf2_pdf, by.x = "files", by.y = "files"), scoredf3_pdf, by = "files")
+all = merge(merge(scoredf1_pdf, scoredf2_pdf, by.x = "files", by.y = "files"), 
+            scoredf3_pdf, by = "files")
 rownames(all) = all$files
 all = all[,c(2,4,6,7)]
 textSize = 1.5
